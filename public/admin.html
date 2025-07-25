@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STOMP 관리자</title>
+    <script src="https://cdn.jsdelivr.net/npm/webstomp-client@1.2.6/dist/webstomp.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background-color: #FF3B30;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .content {
+            padding: 20px;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #E9E9EB;
+            border-radius: 8px;
+        }
+        .section h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #E9E9EB;
+            border-radius: 5px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+        .btn {
+            background-color: #007AFF;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn:hover {
+            background-color: #0056CC;
+        }
+        .btn:disabled {
+            background-color: #C7C7CC;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+        .status.success {
+            background-color: #D4EDDA;
+            color: #155724;
+            border: 1px solid #C3E6CB;
+        }
+        .status.error {
+            background-color: #F8D7DA;
+            color: #721C24;
+            border: 1px solid #F5C6CB;
+        }
+        .client-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #E9E9EB;
+            border-radius: 5px;
+            padding: 10px;
+        }
+        .client-item {
+            padding: 8px;
+            border-bottom: 1px solid #E9E9EB;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .client-item:last-child {
+            border-bottom: none;
+        }
+        .client-id {
+            font-weight: bold;
+            color: #007AFF;
+        }
+        .client-status {
+            font-size: 12px;
+            color: #34C759;
+        }
+        .refresh-btn {
+            background-color: #34C759;
+            margin-left: 10px;
+        }
+        .refresh-btn:hover {
+            background-color: #28A745;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>STOMP 관리자 페이지</h1>
+            <p>연결된 클라이언트들에게 메시지를 전송할 수 있습니다.</p>
+        </div>
+        <div class="content">
+            <!-- 메시지 전송 섹션 -->
+            <div class="section">
+                <h3>📢 메시지 전송 (STOMP)</h3>
+                <div id="status" style="display: none;"></div>
+                <div class="form-group">
+                    <label for="messageInput">메시지 내용:</label>
+                    <textarea id="messageInput" placeholder="전송할 메시지를 입력하세요..."></textarea>
+                </div>
+                <button class="btn" id="sendBtn" onclick="sendMessage()">메시지 전송</button>
+            </div>
+            <!-- 연결된 클라이언트 섹션 -->
+            <div class="section">
+                <h3>👥 연결된 클라이언트</h3>
+                <div style="display: flex; align-items: center; margin-bottom: 15px;">
+                    <span id="clientCount">0</span>개의 구독 destination
+                    <button class="btn refresh-btn" onclick="refreshClients()">새로고침</button>
+                </div>
+                <div class="client-list" id="clientList">
+                    <div style="text-align: center; color: #666; padding: 20px;">
+                        destination 정보가 없습니다.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        let stompClient = null;
+        let isConnected = false;
+        function showStatus(message, isSuccess = true) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${isSuccess ? 'success' : 'error'}`;
+            statusDiv.style.display = 'block';
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 3000);
+        }
+        function connectStomp() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}`;
+            const socket = new WebSocket(wsUrl);
+            stompClient = webstomp.over(socket);
+            stompClient.connect({}, function(frame) {
+                isConnected = true;
+                showStatus('STOMP 서버에 연결됨', true);
+            }, function(error) {
+                isConnected = false;
+                showStatus('STOMP 연결 오류', false);
+            });
+        }
+        async function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const message = messageInput.value.trim();
+            if (!message) {
+                showStatus('메시지를 입력해주세요.', false);
+                return;
+            }
+            if (!isConnected || !stompClient) {
+                showStatus('STOMP 서버에 연결되어 있지 않습니다.', false);
+                return;
+            }
+            sendBtn.disabled = true;
+            sendBtn.textContent = '전송 중...';
+            try {
+                stompClient.send('/topic/chat', message, {});
+                showStatus('메시지가 성공적으로 전송되었습니다!');
+                messageInput.value = '';
+            } catch (error) {
+                showStatus('메시지 전송 실패', false);
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.textContent = '메시지 전송';
+            }
+        }
+        async function refreshClients() {
+            try {
+                const response = await fetch('/admin/clients');
+                const data = await response.json();
+                const clientCount = document.getElementById('clientCount');
+                const clientList = document.getElementById('clientList');
+                clientCount.textContent = data.count;
+                if (data.clients.length === 0) {
+                    clientList.innerHTML = `
+                        <div style="text-align: center; color: #666; padding: 20px;">
+                            destination 정보가 없습니다.
+                        </div>
+                    `;
+                } else {
+                    clientList.innerHTML = data.clients.map(dest => `
+                        <div class="client-item">
+                            <span class="client-id">${dest}</span>
+                            <span class="client-status">구독중</span>
+                        </div>
+                    `).join('');
+                }
+            } catch (error) {
+                showStatus('클라이언트 목록을 가져오는데 실패했습니다.', false);
+            }
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+            connectStomp();
+            refreshClients();
+            document.getElementById('messageInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+        });
+        setInterval(refreshClients, 30000);
+    </script>
+</body>
+</html> 

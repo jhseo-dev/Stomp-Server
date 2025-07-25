@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STOMP 수신 클라이언트</title>
+    <script src="https://cdn.jsdelivr.net/npm/webstomp-client@1.2.6/dist/webstomp.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            background-color: #007AFF;
+            color: white;
+            padding: 1rem;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            max-width: 600px;
+            margin: 0 auto;
+            width: 100%;
+            background-color: white;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .message {
+            max-width: 70%;
+            padding: 0.75rem 1rem;
+            border-radius: 1rem;
+            word-wrap: break-word;
+            align-self: flex-start;
+            text-align: left;
+        }
+        .message.admin {
+            background-color: #FF3B30;
+            color: white;
+            max-width: 90%;
+            font-weight: bold;
+        }
+        .message.other {
+            background-color: #E9E9EB;
+            color: black;
+        }
+        .message-info {
+            font-size: 0.75rem;
+            margin-bottom: 0.25rem;
+            opacity: 0.7;
+        }
+        .status {
+            text-align: center;
+            padding: 0.5rem;
+            font-size: 0.875rem;
+            color: #666;
+        }
+        .status.connected {
+            color: #34C759;
+        }
+        .status.disconnected {
+            color: #FF3B30;
+        }
+        .info-panel {
+            padding: 1rem;
+            background-color: #f8f9fa;
+            border-top: 1px solid #E9E9EB;
+            text-align: center;
+        }
+        .info-text {
+            color: #666;
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>STOMP 수신 클라이언트</h1>
+    </div>
+    <div class="chat-container">
+        <div class="status disconnected" id="status">연결 중...</div>
+        <div class="messages" id="messages"></div>
+        <div class="info-panel">
+            <div class="info-text">
+                📱 수신 전용 클라이언트입니다.<br>
+                관리자 페이지: <a href="/admin" target="_blank">/admin</a>
+            </div>
+        </div>
+    </div>
+    <script>
+        let stompClient = null;
+        let myClientId = null;
+        const messagesContainer = document.getElementById('messages');
+        const statusElement = document.getElementById('status');
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}`;
+            console.log('WebSocket 연결 시도:', wsUrl);
+            const socket = new WebSocket(wsUrl);
+            stompClient = webstomp.over(socket);
+            // WebSocket의 onmessage 이벤트를 직접 처리
+            socket.addEventListener('message', function(event) {
+                console.log('WebSocket raw message:', event.data);
+                // STOMP MESSAGE 프레임인지 확인
+                if (event.data.includes('MESSAGE\n')) {
+                    console.log('STOMP MESSAGE 프레임 감지');
+                    // STOMP 프레임 파싱
+                    const lines = event.data.split('\n');
+                    let body = '';
+                    let inBody = false;
+                    for (let i = 0; i < lines.length; i++) {
+                        if (lines[i] === '') {
+                            inBody = true;
+                            continue;
+                        }
+                        if (inBody) {
+                            body += lines[i] + '\n';
+                        }
+                    }
+                    // null 문자 제거
+                    body = body.replace(/\0$/, '');
+                    console.log('파싱된 메시지 body:', body);
+                    if (body.trim()) {
+                        addMessage(body.trim(), 'other', '/topic/chat');
+                    }
+                }
+            });
+            stompClient.connect({}, function(frame) {
+                console.log('STOMP 연결 성공:', frame);
+                statusElement.textContent = '연결됨 (STOMP)';
+                statusElement.className = 'status connected';
+                // /topic/chat 구독
+                console.log('/topic/chat 구독 시도');
+                stompClient.subscribe('/topic/chat', function(message) {
+                    console.log('STOMP MESSAGE 수신:', message);
+                    console.log('message.body:', message.body);
+                    console.log('message.headers:', message.headers);
+                    if (message.body && message.body.length > 0) {
+                        addMessage(message.body, 'other', '/topic/chat');
+                    } else {
+                        addMessage('[빈 메시지]', 'other', '/topic/chat');
+                    }
+                });
+            }, function(error) {
+                console.error('STOMP 연결 오류:', error);
+                statusElement.textContent = '연결 오류';
+                statusElement.className = 'status disconnected';
+            });
+        }
+        function addMessage(text, type, sender) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            messageDiv.style.alignSelf = 'flex-start';
+            messageDiv.style.textAlign = 'left';
+            if (type !== 'admin') {
+                const infoDiv = document.createElement('div');
+                infoDiv.className = 'message-info';
+                infoDiv.textContent = sender;
+                messageDiv.appendChild(infoDiv);
+            }
+            const textDiv = document.createElement('div');
+            textDiv.textContent = text;
+            messageDiv.appendChild(textDiv);
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        connect();
+    </script>
+</body>
+</html> 
